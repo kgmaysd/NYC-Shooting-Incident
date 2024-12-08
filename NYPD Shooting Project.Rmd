@@ -1,0 +1,176 @@
+---
+title: "Shooting Crime in New York  City"
+output:
+  pdf_document: default
+  html_document: default
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(tidyverse)
+library(lubridate)
+library(hms)
+library(ggplot2)
+```
+<br><br>
+
+This project provides a descriptive analysis of the shooting crimes in New York City (NYC). It primarily focuses on the demographic and geographic characteristics of shooting incidents. The analysis is based on New York Police Department (NYPD) Shooting Incident data <https://catalog.data.gov/dataset/nypd-shooting-incident-data-historic>. 
+
+
+```{r load_data, include=FALSE}
+nypd_shooting_incident <- read.csv("https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD")
+```
+
+## Data preparation
+
+A simple description of the data shows that it contains multiple variables. 
+
+```{r raw_data, echo=FALSE}
+summary(nypd_shooting_incident)
+```
+
+We see that some of the variables have missing values or report unknowns although some of these variables are not key to the analysis. For the analysis, I excluded observation with missing or unknown race or age of the victim, as well as generated new variables. Note that if there are too many missing values on variable(s) that are key to the analysis, one has to do data imputation and/or look for alternative data sources or proxy variables. 
+
+```{r clean_data, echo=TRUE}
+
+nypd_shooting_clean <- nypd_shooting_incident %>% 
+  filter(VIC_RACE != "UNKNOWN", VIC_AGE_GROUP != "UNKNOWN") %>% 
+  mutate(
+    OCCUR_DATE = as.Date(OCCUR_DATE, "%m/%d/%Y"),
+    OCCUR_HOUR = lubridate::hour(as_hms(OCCUR_TIME)),
+    Night = ifelse(OCCUR_HOUR >= 18 | OCCUR_HOUR < 6, 1, 0),
+    CRIME =  case_when(STATISTICAL_MURDER_FLAG == "true" ~ "Murder", 
+             STATISTICAL_MURDER_FLAG == "false" ~ "Not Murder", 
+             TRUE ~STATISTICAL_MURDER_FLAG),
+    Murder = ifelse(CRIME == "Murder", 1, 0), 
+    Male = ifelse(VIC_SEX == "M", 1, 0),    
+    Young = ifelse(VIC_AGE_GROUP == "18-24", 1, 0), 
+    Black = ifelse(VIC_RACE == "BLACK", 1, 0),       
+    Brooklyn = ifelse(BORO == "BROOKLYN", 1, 0),
+    Bronx = ifelse(BORO == "BRONX", 1, 0),
+    Manhattan = ifelse(BORO == "MANHATTAN", 1, 0),
+    Queens = ifelse(BORO == "QUEENS", 1, 0),
+    Staten_Island = ifelse(BORO == "STATEN ISLAND", 1, 0)) %>% 
+  select(-c(LOC_OF_OCCUR_DESC, PRECINCT, JURISDICTION_CODE, 
+        LOC_CLASSFCTN_DESC, LOCATION_DESC, X_COORD_CD, 
+        Y_COORD_CD, Latitude, Longitude, Lon_Lat))
+```
+
+
+```{r clean_data_summary, echo=FALSE}
+summary(nypd_shooting_clean)
+
+```
+
+
+<br><br>
+
+## Data Visualization
+
+The evolution of shooting incidents in NYC over time shows a general decline in such incidents. However, there was a significant increase during the COVID-19 pandemic years between 2020 and 2022, although the numbers later decreased to levels comparable to those in 2016. Additionally, the distribution of crime is uneven across the boroughs of NYC. The Bronx and Brooklyn appear to be the primary locations for most shooting incidents, whereas Staten Island and Manhattan experienced significantly fewer incidents.
+
+
+
+```{r by Boro per time-period, echo=FALSE, message=FALSE, warning=FALSE}
+
+# Incidents by year
+shooting_by_year <- nypd_shooting_clean %>%
+  group_by(YEAR = format(OCCUR_DATE, "%Y")) %>%
+  summarise(total_incidents = n()) 
+
+ggplot(shooting_by_year, aes(x = YEAR, y = total_incidents)) +
+  geom_bar(stat = "identity", fill = "skyblue", color = "black") + 
+  labs(
+    title = "Total Shooting Incidents by Year",
+    x = "Year",
+    y = "Number of Shooting Incidents"
+  ) +
+  theme_minimal() 
+
+
+
+# Incidents by location
+shooting_by_boro_year <- nypd_shooting_clean %>%
+  group_by(BORO, YEAR = format(OCCUR_DATE, "%Y")) %>%
+  summarise(total_incidents = n())
+
+ggplot(shooting_by_boro_year, aes(x = YEAR, y = total_incidents, group = BORO, color = BORO)) +
+  geom_line(linewidth = 1.2) +  
+  facet_wrap(~BORO) +  
+  labs(
+    title = "Number of Shooting Incidents by Borough by Year",
+    x = "Year",
+    y = "Number of Shooting Incidents"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none", axis.text.x = element_text(angle = 90, hjust = 1))  
+
+
+# Incidents by race
+shooting_by_race_year <- nypd_shooting_clean %>%
+  group_by(VIC_RACE) %>%
+  summarise(total_incidents = n())
+
+ggplot(shooting_by_race_year, aes(x = "", y = total_incidents, fill = VIC_RACE)) +
+  geom_bar(stat = "identity", width = 1) + 
+  coord_polar(theta = "y") +
+  labs(title = "Shooting Incidents by Race, 2006-23") +
+  theme_void() +
+  scale_fill_brewer(palette = "Set3") +
+  theme(legend.title = element_blank())
+
+```
+<br>
+An analysis of the demographic characteristics of these crimes reveals that different communities are disproportionately affected by criminal activity. A significant number of victims were Black. White Hispanics and Black Hispanics also experienced higher levels of criminal activity compared to other racial groups.
+
+
+<br><br>
+
+## Model of crime severity
+
+Here, I examined the likelihood and severity of shooting incidents, differentiating between incidents that led to murder and those that did not. As shown by the proportion of shooting incidents by severity, the majority were non-fatal; however, the fatality rate was still relatively high. To explore potential factors contributing to this, I applied a simple yet effective modeling approach: a linear probability model.
+
+<br><br>
+
+```{r lp_model, echo=FALSE, message=FALSE, warning=FALSE}
+# Incident by severity of crime and year
+shooting_by_crime_year <- nypd_shooting_clean %>%
+  group_by(CRIME, YEAR = format(OCCUR_DATE, "%Y")) %>%
+  summarise(crime_incidents = n()) %>%
+  group_by(YEAR) %>%
+  mutate(total_incidents = sum(crime_incidents), proportion = crime_incidents / total_incidents)
+
+ggplot(shooting_by_crime_year, aes(x = YEAR, y = proportion * 100, fill = CRIME)) +
+  geom_bar(stat = "identity", position = "stack") + 
+  labs(
+    title = "Percentage of Shooting Incidents by Crime and Year",
+    x = "Year",
+    y = "Percentage of Shooting Incidents (%)"
+  ) +
+theme_minimal() +
+theme(legend.title = element_blank(), legend.position = "bottom", axis.text.x = element_text(angle = 90, hjust = 1))  
+
+
+# Linear Probability Model (LPM) 
+lpm_model <- lm(Murder ~  Male + Young + Black + Night + Brooklyn + Bronx + Queens + Staten_Island, 
+                    data = nypd_shooting_clean)
+
+# Summary of the model
+summary(lpm_model)
+
+```
+
+
+The model runs a regression of murder on indicators such as gender (male), age (youth, 18-24), race (Black), and location. As shown by the estimates, the model does not explain much of the variation in the likelihood of murder, so caution is necessary when drawing conclusions. However, the estimates reveal interesting and sometimes counterintuitive results: there is no significant difference between males and females, youth and Black individuals were less likely to be killed, nighttime shootings were negatively associated with the likelihood of murder, and compared with Manhattan, the other boroughs appeared to have a higher chance of a shooting incident being fatal.
+
+<br><br>
+
+## Conclusion
+
+The analysis showed a declining trend in shooting incidents over time until the COVID-19 pandemic, during which incidents significantly increased. It also highlighted the uneven distribution of shooting incidents across different locations and communities. Additionally, a simple model was applied to examine the relationship between victim characteristics, location of incidents, and the fatality of the incidents. However, the model lacked predictive power.
+
+Despite the useful insights from the descriptive analysis, interpretation of the results requires caution. A main source of bias may be due to a premature conclusion from the descriptive statistics that shooting incidents are inherent to certain locations or demographic behaviors. However, this is erroneous because the model did not account for variables known to have a strong relationship with crime. For example, the negative significant coefficient for Black individuals, despite a high number of shooting incidents among Blacks, could be due to the failure to control for key socioeconomic factors, which may lead to biased estimates and conclusions. These factors include household income, age distribution, population composition and density, and the level of policing activity. The descriptive analysis provides key steppingstones for more rigorous and causal analysis. Therefore, it is necessary to collect more data and run additional robustness checks.
+
+
