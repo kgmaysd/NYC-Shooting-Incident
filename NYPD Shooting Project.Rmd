@@ -6,14 +6,19 @@ output:
 date: "`r format(Sys.time(), '%B %d, %Y')`"
 ---
 
-```{r setup, include=FALSE}
+```{r packages, echo=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-library(dplyr)
-library(tidyverse)
-library(lubridate)
-library(hms)
-library(ggplot2)
+
+# Install and load missing packages
+if (!requireNamespace("pacman", quietly = TRUE)) {
+  install.packages("pacman") 
+}
+
+library(pacman) 
+p_load(tidyverse,dplyr, ggplot2, lubridate, hms)
 ```
+
+
 <br><br>
 
 This project provides a descriptive analysis of the shooting crimes in New York City (NYC). It primarily focuses on the demographic and geographic characteristics of shooting incidents. The analysis is based on New York Police Department (NYPD) Shooting Incident data <https://catalog.data.gov/dataset/nypd-shooting-incident-data-historic>. 
@@ -174,3 +179,9 @@ The analysis showed a declining trend in shooting incidents over time until the 
 Despite the useful insights from the descriptive analysis, interpretation of the results requires caution. A main source of bias may be due to a premature conclusion from the descriptive statistics that shooting incidents are inherent to certain locations or demographic behaviors. However, this is erroneous because the model did not account for variables known to have a strong relationship with crime. For example, the negative significant coefficient for Black individuals, despite a high number of shooting incidents among Blacks, could be due to the failure to control for key socioeconomic factors, which may lead to biased estimates and conclusions. These factors include household income, age distribution, population composition and density, and the level of policing activity. The descriptive analysis provides key steppingstones for more rigorous and causal analysis. Therefore, it is necessary to collect more data and run additional robustness checks.
 
 
+<br><br>
+\vspace{0.5in}
+
+**Additional material**
+
+GitHub: <https://github.com/kgmaysd/NYC-Shooting-Incident>
